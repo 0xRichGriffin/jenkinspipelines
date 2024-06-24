@@ -2,12 +2,14 @@
 List<String> projects
 List<String> allGroups
 List<String> mergeGroups
+
 String projectName
 String groupSlug
 String defaultReviewerGroup = ""
 String defaultReviewerNumOfApprovals
 String accessToken
 String repoName
+
 pipeline {
     agent none
 
