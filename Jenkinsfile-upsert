@@ -1,0 +1,124 @@
+@Library('global') _
+List<String> projects
+List<String> allGroups
+List<String> mergeGroups
+String projectName
+String groupSlug
+String defaultReviewerGroup = ""
+String defaultReviewerNumOfApprovals
+String accessToken
+String repoName
+pipeline {
+    agent none
+
+    options {
+        ansiColor('xterm')
+        buildDiscarder(logRotator(numToKeepStr: '20', artifactNumToKeepStr: '20'))
+    }
+
+    parameters {
+        string(name: 'REPO_NAME', defaultValue: '', description: 'Name of the repo you want to create/update. Repo name should be all lowercase and have hyphens between words')
+        choice(name: 'REPO_TYPE', choices: ['ansible', 'blank', 'docker', 'maven', 'maven-docker', 'packer', 'terraform', 'terraform-module', 'standard', 'k8sapp'], description: 'Repo type will be used to determine but content to add to a .gitignore and README')
+        string(name: 'NUM_OF_APPROVALS', defaultValue: '1', description: 'Minimum of approvals needed for a pull request')
+
+    }
+
+    stages {
+        stage("Init") {
+            agent {
+                label 'flooid-node'
+            }
+            steps {
+                script {
+                    if (!"${params.REPO_NAME}"?.trim()) {
+                        jenkins.badParameterFailure("REPO_NAME", "<empty>")
+                    }
+                    repoName = "${params.REPO_NAME}".toLowerCase().replace(" ", "-")
+                    currentBuild.displayName = currentBuild.displayName + " - ${repoName}"
+
+                    String currentDirectory = pwd()
+                    accessToken = sh(returnStdout: true, script: "${currentDirectory}/access_token.sh")
+                    projects = retrieveProjectNames(accessToken)
+                    allGroups = retrieveAllGroupSlugs(accessToken)
+                    mergeGroups = retrieveMergeGroupSlugs(accessToken)
+
+                }
+            }
+
+        }
+        stage("Select Project") {
+            agent none
+            steps {
+                script {
+                    Object projectSelectInput = input(message: 'Select BitBucket Project:',
+                            parameters: [
+                                    choice(choices: projects, name: 'projectName')
+                            ], submitterParameter: 'submitter')
+                    projectName = projectSelectInput.projectName
+                }
+            }
+        }
+        stage("Select Merge Group") {
+            agent none
+            steps {
+                script {
+                    Object groupSelectInput = input(message: 'Select group that will be allowed to merge a PR:',
+                            parameters: [
+                                    choice(choices: mergeGroups, name: 'groupSlug')
+                            ], submitterParameter: 'submitter')
+                    groupSlug = groupSelectInput.groupSlug
+                }
+            }
+        }
+        stage("Select Default Reviewers") {
+            agent none
+            steps {
+                script {
+                    List<String> defaultReviewerGroups = ["none"]
+                    defaultReviewerGroups.addAll(allGroups)
+                    Object defaultReviewerInput = input(message: 'Set default reviewer information:',
+                            parameters: [
+                                    choice(choices: defaultReviewerGroups, name: 'defaultReviewerGroupSlug', description: "Select a group of users who will be "),
+                                    string(name: 'defaultReviewerNumOfApprovals', defaultValue: '1', description: "Minimum number of default reviewer approvals needed. This is in additional to the minimum number of reviewer set previously"),
+                            ], submitterParameter: 'submitter')
+                    defaultReviewerGroup = defaultReviewerInput.defaultReviewerGroupSlug
+                    defaultReviewerNumOfApprovals = defaultReviewerInput.defaultReviewerNumOfApprovals
+                }
+            }
+        }
+        stage("Create/Update Repo") {
+            agent {
+                label 'flooid-node'
+            }
+            steps {
+                script {
+                    String projectKey = retrieveProjectKey(projectName, accessToken)
+                    String defaultReviewVariables = ""
+                    if (defaultReviewerGroup != "none") {
+                        defaultReviewVariables = "default_reviewers_group=${defaultReviewerGroup} default_num_of_approvals=${defaultReviewerNumOfApprovals}"
+                    }
+                    String variables = "repo_name=\"${repoName}\" repo_type=${params.REPO_TYPE} project_key=${projectKey} merge_group=${groupSlug} num_of_approvals=${params.NUM_OF_APPROVALS} ${defaultReviewVariables}"
+                    sshagent(credentials: ['git-ssh']) {
+                        sh "ANSIBLE_JINJA2_NATIVE=true ansible-playbook -i upsert, -c local site.yml --extra-vars='${variables}'"
+                    }
+                }
+            }
+        }
+    }
+}
+
+List<String> retrieveProjectNames(String accessToken) {
+    return sh(returnStdout: true, script: "curl -X GET -s -H 'Authorization: Bearer ${accessToken}' https://api.bitbucket.org/2.0/workspaces/flooid/projects | jq -r '.values | sort_by(.name) | .[].name'").trim().split()
+}
+
+String retrieveProjectKey(String projectName, String accessToken) {
+    return sh(returnStdout: true, script: "curl -X GET -s -H 'Authorization: Bearer ${accessToken}' https://api.bitbucket.org/2.0/workspaces/flooid/projects | jq -r '.values[] | select(.name == \"${projectName}\") | .key'").trim()
+}
+
+List<String> retrieveMergeGroupSlugs(String accessToken) {
+    return sh(returnStdout: true, script: "curl -X GET -s -H 'Authorization: Bearer ${accessToken}' https://api.bitbucket.org/1.0/groups/flooid | jq -r 'sort_by(.slug) | .[] | select (.permission != \"read\") | .slug'").trim().split()
+}
+
+List<String> retrieveAllGroupSlugs(String accessToken) {
+    return sh(returnStdout: true, script: "curl -X GET -s -H 'Authorization: Bearer ${accessToken}' https://api.bitbucket.org/1.0/groups/flooid | jq -r 'sort_by(.slug) |.[].slug'").trim().split()
+}
