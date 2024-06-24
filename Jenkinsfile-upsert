@@ -28,25 +28,28 @@ pipeline {
     stages {
         stage("Init") {
             agent {
-                label 'flooid-node'
+                label 'flooid-node-create-project-overlay'
             }
             steps {
                 script {
                     if (!"${params.REPO_NAME}"?.trim()) {
                         jenkins.badParameterFailure("REPO_NAME", "<empty>")
                     }
+                    
                     repoName = "${params.REPO_NAME}".toLowerCase().replace(" ", "-")
                     currentBuild.displayName = currentBuild.displayName + " - ${repoName}"
 
                     String currentDirectory = pwd()
                     accessToken = sh(returnStdout: true, script: "${currentDirectory}/access_token.sh")
+                    if (!accessToken) {
+                        jenkins.badParameterFailure("ACCESS_TOKEN", "<empty>")
+                    }
+
                     projects = retrieveProjectNames(accessToken)
                     allGroups = retrieveAllGroupSlugs(accessToken)
                     mergeGroups = retrieveMergeGroupSlugs(accessToken)
-
                 }
             }
-
         }
         stage("Select Project") {
             agent none
@@ -56,6 +59,7 @@ pipeline {
                             parameters: [
                                     choice(choices: projects, name: 'projectName')
                             ], submitterParameter: 'submitter')
+
                     projectName = projectSelectInput.projectName
                 }
             }
@@ -68,6 +72,7 @@ pipeline {
                             parameters: [
                                     choice(choices: mergeGroups, name: 'groupSlug')
                             ], submitterParameter: 'submitter')
+
                     groupSlug = groupSelectInput.groupSlug
                 }
             }
@@ -83,6 +88,7 @@ pipeline {
                                     choice(choices: defaultReviewerGroups, name: 'defaultReviewerGroupSlug', description: "Select a group of users who will be "),
                                     string(name: 'defaultReviewerNumOfApprovals', defaultValue: '1', description: "Minimum number of default reviewer approvals needed. This is in additional to the minimum number of reviewer set previously"),
                             ], submitterParameter: 'submitter')
+
                     defaultReviewerGroup = defaultReviewerInput.defaultReviewerGroupSlug
                     defaultReviewerNumOfApprovals = defaultReviewerInput.defaultReviewerNumOfApprovals
                 }
@@ -96,9 +102,11 @@ pipeline {
                 script {
                     String projectKey = retrieveProjectKey(projectName, accessToken)
                     String defaultReviewVariables = ""
+
                     if (defaultReviewerGroup != "none") {
                         defaultReviewVariables = "default_reviewers_group=${defaultReviewerGroup} default_num_of_approvals=${defaultReviewerNumOfApprovals}"
                     }
+
                     String variables = "repo_name=\"${repoName}\" repo_type=${params.REPO_TYPE} project_key=${projectKey} merge_group=${groupSlug} num_of_approvals=${params.NUM_OF_APPROVALS} ${defaultReviewVariables}"
                     sshagent(credentials: ['git-ssh']) {
                         sh "ANSIBLE_JINJA2_NATIVE=true ansible-playbook -i upsert, -c local site.yml --extra-vars='${variables}'"
