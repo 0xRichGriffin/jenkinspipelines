@@ -6,4 +6,4 @@ runme:
 
 # jenkinspipelines
 
-playground for using different SCM plugins
+playground for using different SCM plugins 
