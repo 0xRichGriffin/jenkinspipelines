@@ -1,4 +1,4 @@
-@Library('global') _
+// @Library('global') _
 List<String> projects
 List<String> allGroups
 List<String> mergeGroups
