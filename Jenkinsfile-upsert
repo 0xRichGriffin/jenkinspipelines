@@ -13,10 +13,10 @@ String repoName
 pipeline {
     agent none
 
-    options {
-        ansiColor('xterm')
-        buildDiscarder(logRotator(numToKeepStr: '20', artifactNumToKeepStr: '20'))
-    }
+    // options {
+    //     ansiColor('xterm')
+    //     buildDiscarder(logRotator(numToKeepStr: '20', artifactNumToKeepStr: '20'))
+    // }
 
     parameters {
         string(name: 'REPO_NAME', defaultValue: '', description: 'Name of the repo you want to create/update. Repo name should be all lowercase and have hyphens between words')
